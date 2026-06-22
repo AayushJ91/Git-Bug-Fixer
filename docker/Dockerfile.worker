@@ -1,0 +1,31 @@
+# =============================================================================
+# Dockerfile for Celery workers (GPU-capable)
+# =============================================================================
+FROM python:3.11-slim AS base
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir pip --upgrade && \
+    pip install --no-cache-dir ".[dev]"
+
+# Copy application code
+COPY . .
+
+# Create non-root user
+RUN adduser --disabled-password --gecos "" appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
+# Run Celery worker
+CMD ["celery", "-A", "app.tasks.celery_app", "worker", \
+     "--loglevel=info", \
+     "--concurrency=2", \
+     "--max-tasks-per-child=100"]

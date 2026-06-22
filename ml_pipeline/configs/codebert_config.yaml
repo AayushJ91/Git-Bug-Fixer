@@ -1,0 +1,44 @@
+# =============================================================================
+# CodeBERT Fine-Tuning Configuration
+# =============================================================================
+
+model:
+  name: "microsoft/codebert-base"
+  num_labels: 2
+  max_length: 512
+
+training:
+  epochs: 10
+  batch_size: 16
+  learning_rate: 2.0e-5
+  warmup_steps: 200
+  weight_decay: 0.01
+  freeze_epochs: 2
+  gradient_accumulation_steps: 1
+  patience: 3
+
+data:
+  path: "data/processed/tokenized_diffs.parquet"
+  text_column: "text"
+  label_column: "label"
+  group_column: "repo_id"
+  test_size: 0.15
+
+evaluation:
+  primary_metric: "val_auc_roc"
+  metrics:
+    - val_auc_roc
+    - val_auc_pr
+    - val_f1
+    - train_loss
+
+mlflow:
+  experiment_name: "pr-risk-codebert"
+  tracking_uri: "http://localhost:5000"
+
+output:
+  model_dir: "models/codebert-v1"
+
+hardware:
+  device: "auto"  # auto, cpu, cuda, mps
+  fp16: true

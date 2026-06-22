@@ -1,0 +1,124 @@
+# =============================================================================
+# Docker Compose — Development Environment
+# =============================================================================
+# Starts: API + Worker + PostgreSQL + Redis + MLflow
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose logs -f api    # Tail API logs
+#   docker compose down           # Stop all services
+# =============================================================================
+
+version: "3.8"
+
+services:
+  # --- FastAPI Application ---
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=development
+      - DEBUG=true
+      - DATABASE_URL=postgresql+asyncpg://pruser:prpass@db:5432/pranalyzer
+      - DATABASE_URL_SYNC=postgresql+psycopg2://pruser:prpass@db:5432/pranalyzer
+      - REDIS_URL=redis://redis:6379/0
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MODEL_PATH=/models/current
+    volumes:
+      - model-artifacts:/models
+      - ../app:/app/app  # Hot reload
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- Celery Worker ---
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    environment:
+      - APP_ENV=development
+      - DATABASE_URL=postgresql+asyncpg://pruser:prpass@db:5432/pranalyzer
+      - DATABASE_URL_SYNC=postgresql+psycopg2://pruser:prpass@db:5432/pranalyzer
+      - REDIS_URL=redis://redis:6379/0
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - MODEL_PATH=/models/current
+    volumes:
+      - model-artifacts:/models
+      - ../app:/app/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- PostgreSQL Database ---
+  db:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: pranalyzer
+      POSTGRES_USER: pruser
+      POSTGRES_PASSWORD: prpass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pruser -d pranalyzer"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # --- Redis ---
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # --- MLflow Tracking Server ---
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.10.0
+    ports:
+      - "5000:5000"
+    environment:
+      - BACKEND_STORE_URI=postgresql+psycopg2://pruser:prpass@db:5432/mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql+psycopg2://pruser:prpass@db:5432/mlflow
+      --default-artifact-root /mlflow/artifacts
+    volumes:
+      - mlflow-artifacts:/mlflow/artifacts
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  model-artifacts:
+  mlflow-artifacts:
